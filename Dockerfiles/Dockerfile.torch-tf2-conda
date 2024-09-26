@@ -1,0 +1,72 @@
+# ==================================================================
+# This dockerfile creates images with the specified and valid combinations
+# of PyTorch and TensorFlow versions (conda base environments). 
+# The images are based on the ubuntu image, since torch includes its own 
+# cuda installation. Additionally, for better managed dependencies, 
+# conda is added to the container image.
+# ------------------------------------------------------------------
+FROM ubuntu:20.04 
+
+LABEL maintainer="Amadou Wolfgang Cisse: amadou.6e@googlemail.com"
+
+# Configure OS encoding
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
+# Point PATH to upcoming conda install
+ENV PATH=/opt/conda/bin:$PATH
+# Allow NVIDIA access to GPU
+ENV NVIDIA_VISIBLE_DEVICES all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+# Install minimal dependencies
+RUN apt-get update -q && \
+    apt-get install -q -y --no-install-recommends \
+    bzip2 \
+    ca-certificates \
+    wget && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# ==================================================================
+# Install Miniforge (lighter alternative to Miniconda)
+# ------------------------------------------------------------------
+ARG MINIFORGE_URL="https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh"
+RUN wget "$MINIFORGE_URL" -O miniforge.sh -q && \
+    bash miniforge.sh -b -p /opt/conda && \
+    rm miniforge.sh && \
+    /opt/conda/bin/conda clean -afy
+
+# Set the python version for the base environment
+ARG PYTHON_VERSION=3.9
+RUN conda install python=${PYTHON_VERSION} -y && \
+    conda clean -afy
+
+# ==================================================================
+# Switch user before using pip (installing with root is not recommended)
+# ------------------------------------------------------------------
+RUN useradd -ms /bin/bash container-user
+RUN chown -R container-user:container-user /opt/conda
+RUN chown -R container-user:container-user /root/.cache
+USER container-user
+
+# ==================================================================
+# Install torch and tensorflow
+# ------------------------------------------------------------------
+
+# Use the base environment to install PyTorch and TensorFlow
+ARG TORCH_VERSION=2.3.0
+ARG TF_VERSION=2.14.0
+ARG CUDA_VERSION=cu118
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir numpy==1.24.3 && \
+    pip install --no-cache-dir torch=={TORCH_VERSION} --extra-index-url https://download.pytorch.org/whl/{CUDA_VERSION} && \
+    pip install --no-cache-dir tensorflow=={TF_VERSION}
+
+# Clean up any unnecessary conda and pip files
+USER root
+RUN conda clean -afy && \
+    find /opt/conda/ -follow -type f -name '*.a' -delete && \
+    find /opt/conda/ -follow -type f -name '*.js.map' -delete
+
+RUN rm -rf /root/.cache/pip 
+
+
